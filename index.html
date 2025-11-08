@@ -1,119 +1,89 @@
-/****************************************************
- * ESP32 + MQTT + DHT11
- * - Controle do relé: tópico "casasenai/rele"
- * - Envio de temperatura: tópico "senai/temperatura"
- ****************************************************/
-
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include "DHT.h"              // biblioteca do sensor DHT
-
-// -------- CONFIGURAÇÕES DE REDE --------
-const char* ssid = "ReMoTe";
-const char* password = "remote2025";
-
-// -------- CONFIGURAÇÕES DO MQTT --------
-const char* mqttServer = "broker.emqx.io";
-const int   mqttPort   = 1883;
-const char* topicRele  = "senaimesa6/rele";         // tópico de controle
-const char* topicTemp  = "senaimesa6/temperatura";  // tópico de temperatura
-
-// -------- HARDWARE --------
-#define DHTPIN 26        // pino de dados do DHT11
-#define DHTTYPE DHT11    // tipo do sensor
-const int rele = 27;     // pino do relé
-
-DHT dht(DHTPIN, DHTTYPE);     // cria objeto DHT
-WiFiClient espClient;
-PubSubClient client(espClient);
-
-unsigned long ultimoEnvio = 0;   // controle de tempo
-
-// -------- CALLBACK (mensagens recebidas) --------
-void callback(char* topic, byte* payload, unsigned int length) {
-  String msg = "";
-  for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
-
-  Serial.printf("[MQTT] %s => %s\n", topic, msg.c_str());
-
-  if (msg == "on") {
-    digitalWrite(rele, HIGH);
-    Serial.println("Relé LIGADO");
-  } else if (msg == "off") {
-    digitalWrite(rele, LOW);
-    Serial.println("Relé DESLIGADO");
-  }
-}
-
-// -------- CONECTA AO WI-FI --------
-void conectaWiFi() {
-  Serial.printf("Conectando ao Wi-Fi %s", ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.printf("\nWi-Fi conectado! IP: %s\n", WiFi.localIP().toString().c_str());
-}
-
-// -------- CONECTA AO BROKER MQTT --------
-void conectaMQTT() {
-  while (!client.connected()) {
-    Serial.print("Conectando ao broker MQTT... ");
-    String clientId = "ESP32_" + String(random(0xffff), HEX);
-    if (client.connect(clientId.c_str())) {
-      Serial.println("Conectado!");
-      client.subscribe(topicRele);
-      Serial.print("Inscrito em: ");
-      Serial.println(topicRele);
-    } else {
-      Serial.print("Falha (rc=");
-      Serial.print(client.state());
-      Serial.println("). Tentando em 3s...");
-      delay(3000);
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Controle IoT</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1976d2, #00bcd4);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      text-align: center;
     }
-  }
-}
-
-// -------- SETUP --------
-void setup() {
-  delay(2000);
-  Serial.begin(115200);
-  Serial.println("Iniciando...");
-
-  pinMode(rele, OUTPUT);
-  digitalWrite(rele, LOW);
-  dht.begin();                // inicializa sensor DHT
-  randomSeed(micros());
-
-  conectaWiFi();
-  client.setServer(mqttServer, mqttPort);
-  client.setCallback(callback);
-}
-
-// -------- LOOP --------
-void loop() {
-  if (WiFi.status() != WL_CONNECTED)
-    conectaWiFi();
-
-  if (!client.connected())
-    conectaMQTT();
-
-  client.loop();
-
-  // lê o DHT a cada 10 segundos
-  if (millis() - ultimoEnvio > 10000) {
-    ultimoEnvio = millis();
-    float h = dht.readHumidity();
-    float t = dht.readTemperature();
-
-    if (!isnan(h) && !isnan(t)) {
-      char payload[50];
-      snprintf(payload, sizeof(payload), "{\"temp\":%.1f,\"umid\":%.1f}", t, h);
-      client.publish(topicTemp, payload);
-      Serial.printf("📤 Enviado: %s\n", payload);
-    } else {
-      Serial.println("❌ Falha ao ler o DHT11");
+    h1 { margin-bottom: 10px; }
+    .sensor {
+      font-size: 1.2rem;
+      margin: 10px 0 20px;
     }
-  }
-}
+    .btn {
+      padding: 12px 30px;
+      margin: 10px;
+      border: none;
+      border-radius: 30px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      cursor: pointer;
+      color: white;
+      transition: 0.2s;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    }
+    .on { background: #4caf50; }
+    .off { background: #e53935; }
+    .btn:hover { transform: scale(1.05); }
+    #status { margin-top: 20px; font-size: 0.9rem; opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <h1>💡 Controle IoT</h1>
+  <div class="sensor">
+    🌡️ <span id="temp">--</span> °C   💧 <span id="umid">--</span> %
+  </div>
+  <div>
+    <button class="btn on" id="ligar">Ligar</button>
+    <button class="btn off" id="desligar">Desligar</button>
+  </div>
+  <p id="status">Conectando ao servidor MQTT...</p>
+
+  <script>
+    const broker = 'wss://broker.emqx.io:8084/mqtt';
+    const topicRele = 'casasenai/rele';
+    const topicTemp = 'casasenai/temperatura';
+    const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
+    const client = mqtt.connect(broker, { clientId, connectTimeout: 4000 });
+
+    const temp = document.getElementById('temp');
+    const umid = document.getElementById('umid');
+    const status = document.getElementById('status');
+
+    client.on('connect', () => {
+      status.textContent = '✅ Conectado ao broker MQTT';
+      client.subscribe(topicTemp);
+    });
+
+    client.on('message', (topic, payload) => {
+      if (topic === topicTemp) {
+        try {
+          const dados = JSON.parse(payload.toString());
+          temp.textContent = dados.temp.toFixed(1);
+          umid.textContent = dados.umid.toFixed(1);
+        } catch {
+          console.warn('Erro ao interpretar JSON');
+        }
+      }
+    });
+
+    client.on('reconnect', () => status.textContent = '🔄 Reconectando...');
+    client.on('error', err => status.textContent = '❌ Erro: ' + err.message);
+
+    document.getElementById('ligar').onclick = () => client.publish(topicRele, 'on');
+    document.getElementById('desligar').onclick = () => client.publish(topicRele, 'off');
+  </script>
+</body>
+</html>
