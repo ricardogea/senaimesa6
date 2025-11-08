@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Controle de Luz</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background: linear-gradient(135deg, #2e7dff, #4dd0e1);
+      color: white;
+      text-align: center;
+    }
+    h1 {
+      margin-bottom: 30px;
+      text-shadow: 1px 1px 4px rgba(0,0,0,0.3);
+    }
+    .btn {
+      border: none;
+      border-radius: 50px;
+      padding: 15px 40px;
+      margin: 10px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      cursor: pointer;
+      color: white;
+      transition: all 0.25s;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    .btn:hover {
+      transform: scale(1.05);
+    }
+    .on {
+      background: #4caf50;
+    }
+    .off {
+      background: #e53935;
+    }
+    #status {
+      margin-top: 30px;
+      font-size: 0.95rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <h1>💡 Controle de Luz SENAI</h1>
+  <div>
+    <button id="ligar" class="btn on">Ligar</button>
+    <button id="desligar" class="btn off">Desligar</button>
+  </div>
+  <p id="status">Conectando ao servidor MQTT...</p>
+
+  <script>
+    // --- CONFIGURAÇÃO DO BROKER MQTT ---
+    const broker = 'wss://broker.emqx.io:8084/mqtt'; // WebSocket seguro (TLS)
+    const topic  = 'senaimesa6/rele';
+    const clientId = 'web_' + Math.random().toString(16).substring(2);
+
+    // --- CONEXÃO MQTT ---
+    const client = mqtt.connect(broker, { clientId, connectTimeout: 5000 });
+    const status = document.getElementById('status');
+
+    client.on('connect', () => {
+      status.textContent = '✅ Conectado ao servidor MQTT!';
+    });
+
+    client.on('reconnect', () => {
+      status.textContent = '🔄 Reconectando...';
+    });
+
+    client.on('error', (err) => {
+      status.textContent = '❌ Erro de conexão: ' + err.message;
+    });
+
+    // --- FUNÇÕES DE CONTROLE ---
+    function publicar(valor) {
+      client.publish(topic, valor);
+      status.textContent = '📤 Enviado: "' + valor + '"';
+    }
+
+    document.getElementById('ligar').onclick   = () => publicar('on');
+    document.getElementById('desligar').onclick = () => publicar('off');
+  </script>
+</body>
+</html>
