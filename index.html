@@ -1,93 +1,119 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Controle de Luz</title>
-  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <style>
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      margin: 0;
-      background: linear-gradient(135deg, #2e7dff, #4dd0e1);
-      color: white;
-      text-align: center;
-    }
-    h1 {
-      margin-bottom: 30px;
-      text-shadow: 1px 1px 4px rgba(0,0,0,0.3);
-    }
-    .btn {
-      border: none;
-      border-radius: 50px;
-      padding: 15px 40px;
-      margin: 10px;
-      font-size: 1.1rem;
-      font-weight: bold;
-      cursor: pointer;
-      color: white;
-      transition: all 0.25s;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-    }
-    .btn:hover {
-      transform: scale(1.05);
-    }
-    .on {
-      background: #4caf50;
-    }
-    .off {
-      background: #e53935;
-    }
-    #status {
-      margin-top: 30px;
-      font-size: 0.95rem;
-      opacity: 0.9;
-    }
-  </style>
-</head>
-<body>
-  <h1>💡 Controle de Luz SENAI</h1>
-  <div>
-    <button id="ligar" class="btn on">Ligar</button>
-    <button id="desligar" class="btn off">Desligar</button>
-  </div>
-  <p id="status">Conectando ao servidor MQTT...</p>
+/****************************************************
+ * ESP32 + MQTT + DHT11
+ * - Controle do relé: tópico "casasenai/rele"
+ * - Envio de temperatura: tópico "senai/temperatura"
+ ****************************************************/
 
-  <script>
-    // --- CONFIGURAÇÃO DO BROKER MQTT ---
-    const broker = 'wss://broker.emqx.io:8084/mqtt'; // WebSocket seguro (TLS)
-    const topic  = 'senaimesa6/rele';
-    const clientId = 'web_' + Math.random().toString(16).substring(2);
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include "DHT.h"              // biblioteca do sensor DHT
 
-    // --- CONEXÃO MQTT ---
-    const client = mqtt.connect(broker, { clientId, connectTimeout: 5000 });
-    const status = document.getElementById('status');
+// -------- CONFIGURAÇÕES DE REDE --------
+const char* ssid = "ReMoTe";
+const char* password = "remote2025";
 
-    client.on('connect', () => {
-      status.textContent = '✅ Conectado ao servidor MQTT!';
-    });
+// -------- CONFIGURAÇÕES DO MQTT --------
+const char* mqttServer = "broker.emqx.io";
+const int   mqttPort   = 1883;
+const char* topicRele  = "senaimesa6/rele";         // tópico de controle
+const char* topicTemp  = "senaimesa6/temperatura";  // tópico de temperatura
 
-    client.on('reconnect', () => {
-      status.textContent = '🔄 Reconectando...';
-    });
+// -------- HARDWARE --------
+#define DHTPIN 26        // pino de dados do DHT11
+#define DHTTYPE DHT11    // tipo do sensor
+const int rele = 27;     // pino do relé
 
-    client.on('error', (err) => {
-      status.textContent = '❌ Erro de conexão: ' + err.message;
-    });
+DHT dht(DHTPIN, DHTTYPE);     // cria objeto DHT
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-    // --- FUNÇÕES DE CONTROLE ---
-    function publicar(valor) {
-      client.publish(topic, valor);
-      status.textContent = '📤 Enviado: "' + valor + '"';
+unsigned long ultimoEnvio = 0;   // controle de tempo
+
+// -------- CALLBACK (mensagens recebidas) --------
+void callback(char* topic, byte* payload, unsigned int length) {
+  String msg = "";
+  for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
+
+  Serial.printf("[MQTT] %s => %s\n", topic, msg.c_str());
+
+  if (msg == "on") {
+    digitalWrite(rele, HIGH);
+    Serial.println("Relé LIGADO");
+  } else if (msg == "off") {
+    digitalWrite(rele, LOW);
+    Serial.println("Relé DESLIGADO");
+  }
+}
+
+// -------- CONECTA AO WI-FI --------
+void conectaWiFi() {
+  Serial.printf("Conectando ao Wi-Fi %s", ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.printf("\nWi-Fi conectado! IP: %s\n", WiFi.localIP().toString().c_str());
+}
+
+// -------- CONECTA AO BROKER MQTT --------
+void conectaMQTT() {
+  while (!client.connected()) {
+    Serial.print("Conectando ao broker MQTT... ");
+    String clientId = "ESP32_" + String(random(0xffff), HEX);
+    if (client.connect(clientId.c_str())) {
+      Serial.println("Conectado!");
+      client.subscribe(topicRele);
+      Serial.print("Inscrito em: ");
+      Serial.println(topicRele);
+    } else {
+      Serial.print("Falha (rc=");
+      Serial.print(client.state());
+      Serial.println("). Tentando em 3s...");
+      delay(3000);
     }
+  }
+}
 
-    document.getElementById('ligar').onclick   = () => publicar('on');
-    document.getElementById('desligar').onclick = () => publicar('off');
-  </script>
-</body>
-</html>
+// -------- SETUP --------
+void setup() {
+  delay(2000);
+  Serial.begin(115200);
+  Serial.println("Iniciando...");
+
+  pinMode(rele, OUTPUT);
+  digitalWrite(rele, LOW);
+  dht.begin();                // inicializa sensor DHT
+  randomSeed(micros());
+
+  conectaWiFi();
+  client.setServer(mqttServer, mqttPort);
+  client.setCallback(callback);
+}
+
+// -------- LOOP --------
+void loop() {
+  if (WiFi.status() != WL_CONNECTED)
+    conectaWiFi();
+
+  if (!client.connected())
+    conectaMQTT();
+
+  client.loop();
+
+  // lê o DHT a cada 10 segundos
+  if (millis() - ultimoEnvio > 10000) {
+    ultimoEnvio = millis();
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+
+    if (!isnan(h) && !isnan(t)) {
+      char payload[50];
+      snprintf(payload, sizeof(payload), "{\"temp\":%.1f,\"umid\":%.1f}", t, h);
+      client.publish(topicTemp, payload);
+      Serial.printf("📤 Enviado: %s\n", payload);
+    } else {
+      Serial.println("❌ Falha ao ler o DHT11");
+    }
+  }
+}
