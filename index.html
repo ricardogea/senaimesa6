@@ -53,8 +53,8 @@
 
   <script>
     const broker = 'wss://broker.emqx.io:8084/mqtt';
-    const topicRele = 'casasenai/rele';
-    const topicTemp = 'casasenai/temperatura';
+    const topicRele = 'senaimesa6/rele';
+    const topicTemp = 'senaimesa6/temperatura';
     const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
     const client = mqtt.connect(broker, { clientId, connectTimeout: 4000 });
 
@@ -87,3 +87,4 @@
   </script>
 </body>
 </html>
+
